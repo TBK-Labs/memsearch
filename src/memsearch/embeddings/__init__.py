@@ -58,6 +58,13 @@ _INSTALL_HINTS: dict[str, str] = {
 }
 
 
+# Providers that load a model into this process and therefore accept the
+# local-runtime knobs (thread cap, resident-model gate).  Mirrors
+# ``runtime.LOCAL_MODEL_PROVIDERS``; kept here so the factory does not have to
+# import the runtime module to build its kwargs.
+_LOCAL_MODEL_PROVIDERS = frozenset({"local", "onnx"})
+
+
 def get_provider(
     name: str = "openai",
     *,
@@ -65,6 +72,8 @@ def get_provider(
     batch_size: int = 0,
     base_url: str | None = None,
     api_key: str | None = None,
+    threads: int = 0,
+    max_concurrent: int = 0,
 ) -> EmbeddingProvider:
     """Instantiate an embedding provider by name.
 
@@ -81,6 +90,12 @@ def get_provider(
         Override the API base URL (currently only used by the openai provider).
     api_key:
         Override the API key (currently only used by the openai provider).
+    threads:
+        Intra-op thread cap for providers that run the model in this process.
+        ``0`` means auto.  Ignored by API-backed providers.
+    max_concurrent:
+        How many processes may hold this provider's model resident at once.
+        ``0`` means auto.  Ignored by API-backed providers, which hold none.
     """
     if name not in _PROVIDERS:
         raise ValueError(f"Unknown embedding provider {name!r}. Available: {', '.join(sorted(_PROVIDERS))}")
@@ -107,6 +122,9 @@ def get_provider(
             kwargs["api_key"] = api_key
     elif name in ("jina", "mistral") and api_key:
         kwargs["api_key"] = api_key
+    if name in _LOCAL_MODEL_PROVIDERS:
+        kwargs["threads"] = threads
+        kwargs["max_concurrent"] = max_concurrent
     return cls(**kwargs)
 
 

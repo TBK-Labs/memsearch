@@ -24,6 +24,7 @@ from .config import (
 )
 from .index_report import IndexFailure, format_error
 from .index_state import (
+    index_debounce_remaining,
     record_index_error,
     record_index_report,
     record_index_started,
@@ -107,6 +108,8 @@ def _cfg_to_memsearch_kwargs(
         "embedding_batch_size": cfg.embedding.batch_size,
         "embedding_base_url": cfg.embedding.base_url or None,
         "embedding_api_key": cfg.embedding.api_key or None,
+        "embedding_threads": cfg.embedding.threads,
+        "embedding_max_concurrent": cfg.embedding.max_concurrent,
         "milvus_uri": cfg.milvus.uri,
         "milvus_token": cfg.milvus.token or None,
         "collection": cfg.milvus.collection,
@@ -115,6 +118,7 @@ def _cfg_to_memsearch_kwargs(
         "ignore_files": _merge_unique(cfg.indexing.ignore_files, extra_ignore_files),
         "exclude": _merge_unique(cfg.indexing.exclude, extra_exclude),
         "reranker_model": cfg.reranker.model,
+        "reranker_threads": cfg.reranker.threads,
     }
 
 
@@ -281,6 +285,20 @@ def index(
         ),
         default_overrides=_build_cli_overrides(collection=default_collection),
     )
+
+    if not force:
+        remaining = index_debounce_remaining(
+            state_path,
+            collection=cfg.milvus.collection,
+            min_interval_seconds=cfg.indexing.min_interval_seconds,
+        )
+        if remaining > 0:
+            click.echo(
+                f"Skipped indexing: {cfg.milvus.collection} was indexed less than "
+                f"{cfg.indexing.min_interval_seconds}s ago (retry in {remaining:.0f}s, or use --force)."
+            )
+            return
+
     ms = None
     try:
         record_index_started(

@@ -27,7 +27,17 @@ GLOBAL_CONFIG_PATH = Path("~/.memsearch/config.toml").expanduser()
 PROJECT_CONFIG_PATH = Path(".memsearch.toml")
 
 # Fields that should be parsed as int when set via CLI strings
-_INT_FIELDS = {"max_chunk_size", "overlap_lines", "debounce_ms", "batch_size", "min_interval_hours", "min_occurrences"}
+_INT_FIELDS = {
+    "max_chunk_size",
+    "overlap_lines",
+    "debounce_ms",
+    "batch_size",
+    "min_interval_hours",
+    "min_interval_seconds",
+    "min_occurrences",
+    "threads",
+    "max_concurrent",
+}
 _BOOL_FIELDS = {"enabled"}
 _LIST_FIELDS = {"paths", "ignore_files", "exclude"}
 
@@ -60,6 +70,8 @@ class EmbeddingConfig:
     batch_size: int = 0  # 0 = use provider default
     base_url: str = ""  # OpenAI-compatible endpoint URL
     api_key: str = ""  # API key (supports "env:VAR_NAME" syntax)
+    threads: int = 0  # 0 = auto; intra-op threads for local model providers
+    max_concurrent: int = 0  # 0 = auto (1 for local model providers, unlimited for API providers)
 
 
 @dataclass
@@ -87,6 +99,7 @@ class IndexingConfig:
 
     ignore_files: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    min_interval_seconds: int = 0  # 0 = off; minimum gap between indexes of a collection
 
 
 @dataclass
@@ -97,6 +110,7 @@ class WatchConfig:
 @dataclass
 class RerankerConfig:
     model: str = ""  # empty = disabled; set to model ID to enable
+    threads: int = 0  # 0 = auto; intra-op threads for the cross-encoder
 
 
 @dataclass

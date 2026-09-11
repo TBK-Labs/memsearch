@@ -288,10 +288,15 @@ provider = "openai"
 | `embedding.batch_size` | int | `0` | Embedding batch size (0 = provider default) |
 | `embedding.base_url` | string | `""` | OpenAI-compatible API base URL (empty = SDK default) |
 | `embedding.api_key` | string | `""` | API key for embedding provider (supports `env:VAR_NAME` syntax) |
+| `embedding.threads` | int | `0` | Intra-op threads for local model providers (`onnx`, `local`); 0 = auto (capped, not one per core) |
+| `embedding.max_concurrent` | int | `0` | Processes that may hold the embedding model resident at once; 0 = auto (1 for local providers, unlimited for API providers). Override with `MEMSEARCH_EMBED_MAX_CONCURRENT` |
 | `chunking.max_chunk_size` | int | `1500` | Maximum chunk size in characters |
 | `chunking.overlap_lines` | int | `2` | Number of overlapping lines between adjacent chunks |
 | `indexing.ignore_files` | list[string] | `[]` | Ignore filenames discovered within each directory index root; new `config init` files write `[".gitignore"]` |
 | `indexing.exclude` | list[string] | `[]` | Additional gitignore-style patterns relative to each index root |
+| `indexing.min_interval_seconds` | int | `0` | Minimum gap between indexes of a collection; 0 = off. `memsearch index --force` overrides it |
+| `reranker.model` | string | `""` | Cross-encoder model for reranking (empty = disabled) |
+| `reranker.threads` | int | `0` | Intra-op threads for the cross-encoder; 0 = auto |
 | `watch.debounce_ms` | int | `1500` | File watcher debounce delay in milliseconds |
 | `compact.llm_provider` | string | `openai` | *(deprecated)* LLM provider for compact — use `llm.provider` instead |
 | `compact.llm_model` | string | `""` | *(deprecated)* LLM model — use `llm.model` instead |

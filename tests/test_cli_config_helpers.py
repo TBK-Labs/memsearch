@@ -90,6 +90,8 @@ def test_cfg_to_memsearch_kwargs_translates_resolved_config() -> None:
         "embedding_batch_size": 32,
         "embedding_base_url": "http://embeddings.local",
         "embedding_api_key": "env:LOCAL_KEY",
+        "embedding_threads": 0,
+        "embedding_max_concurrent": 0,
         "milvus_uri": "http://milvus.local:19530",
         "milvus_token": "milvus-token",
         "collection": "team_notes",
@@ -98,6 +100,7 @@ def test_cfg_to_memsearch_kwargs_translates_resolved_config() -> None:
         "ignore_files": [".gitignore", ".cursorignore"],
         "exclude": ["generated/**", "drafts/**"],
         "reranker_model": "",
+        "reranker_threads": 0,
     }
 
 

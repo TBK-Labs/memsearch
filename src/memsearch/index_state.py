@@ -57,6 +57,52 @@ def load_index_state(state_path: Path | None) -> dict[str, Any]:
     return {}
 
 
+def index_debounce_remaining(
+    state_path: Path | None,
+    *,
+    collection: str,
+    min_interval_seconds: int,
+    now: datetime | None = None,
+) -> float:
+    """Seconds still to wait before *collection* may be indexed again.
+
+    ``0.0`` means indexing may proceed.  Agent plugins run ``memsearch index``
+    after every turn, once per project, and each run is a fresh process that
+    loads its own copy of the embedding model.  Indexing itself is already
+    incremental — chunk ids include the content hash, so unchanged files are
+    never re-embedded — which means the cost this debounce avoids is the
+    per-process model load and its resident memory, not the embedding work.
+
+    ``min_interval_seconds <= 0`` disables the debounce, preserving the
+    unconditional behaviour of earlier releases.
+    """
+    if min_interval_seconds <= 0:
+        return 0.0
+
+    state = load_index_state(state_path)
+    # A state file describing a different collection says nothing about this one.
+    if state.get("collection") != collection:
+        return 0.0
+
+    last_success = _parse_timestamp(state.get("last_success_at"))
+    if last_success is None:
+        return 0.0
+
+    elapsed = ((now or datetime.now(timezone.utc)) - last_success).total_seconds()
+    return max(0.0, min_interval_seconds - elapsed)
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    """Parse a state timestamp, returning None when missing or unreadable."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def record_index_started(
     state_path: Path | None,
     *,

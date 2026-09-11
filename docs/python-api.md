@@ -29,6 +29,8 @@ MemSearch(
     embedding_batch_size=0,
     embedding_base_url=None,
     embedding_api_key=None,
+    embedding_threads=0,
+    embedding_max_concurrent=0,
     milvus_uri="~/.memsearch/milvus.db",
     milvus_token=None,
     collection="memsearch_chunks",
@@ -47,6 +49,8 @@ MemSearch(
 | `embedding_batch_size` | `int` | `0` | Max texts per embedding API call (0 = provider default) |
 | `embedding_base_url` | `str \| None` | `None` | OpenAI-compatible API base URL. Overrides `OPENAI_BASE_URL` env var |
 | `embedding_api_key` | `str \| None` | `None` | API key for the embedding provider. Overrides `OPENAI_API_KEY` env var |
+| `embedding_threads` | `int` | `0` | Intra-op thread cap for local model providers (`"onnx"`, `"local"`). 0 = auto, which is capped rather than one thread per core |
+| `embedding_max_concurrent` | `int` | `0` | Processes that may hold the embedding model resident at once. 0 = auto (1 for local providers, unlimited for API providers) |
 | `milvus_uri` | `str` | `"~/.memsearch/milvus.db"` | Milvus connection URI — local `.db` path for Milvus Lite (Linux/macOS only), `http://host:port` for Milvus Server, or `https://*.zillizcloud.com` for Zilliz Cloud |
 | `milvus_token` | `str \| None` | `None` | Auth token for Milvus Server or Zilliz Cloud |
 | `collection` | `str` | `"memsearch_chunks"` | Milvus collection name. Use different names to isolate agents sharing the same backend |

@@ -26,7 +26,10 @@ class OnnxEmbedding:
         model: str = "gpahal/bge-m3-onnx-int8",
         *,
         batch_size: int = 0,
+        threads: int = 0,
+        max_concurrent: int = 0,
     ) -> None:
+        self._slot = None
         try:
             import onnxruntime as ort
         except ImportError as exc:
@@ -39,6 +42,8 @@ class OnnxEmbedding:
         from huggingface_hub import hf_hub_download, list_repo_files
         from tokenizers import Tokenizer
 
+        from .runtime import acquire_model_slot, onnx_session_options, resolve_max_concurrent, resolve_threads
+
         # Try offline first (local cache only, no network requests).
         # When files are already cached, hf_hub_download normally still sends
         # HTTP HEAD requests to check for updates.  local_files_only=True skips
@@ -50,7 +55,12 @@ class OnnxEmbedding:
         self._tokenizer.enable_padding(pad_id=1, pad_token="<pad>")
         self._tokenizer.enable_truncation(max_length=8192)
 
-        self._session = ort.InferenceSession(model_path)
+        # Hold a slot for as long as the model is resident, not just while it
+        # loads: RSS stays at its peak (1.74-1.88 GB measured) until this
+        # process exits, so the gate has to outlive the load.
+        self._slot = acquire_model_slot(resolve_max_concurrent("onnx", max_concurrent))
+
+        self._session = ort.InferenceSession(model_path, sess_options=onnx_session_options(resolve_threads(threads)))
         self._output_names = [o.name for o in self._session.get_outputs()]
         self._has_dense_vecs = "dense_vecs" in self._output_names
         # BERT-family exports (e.g. Xenova/all-MiniLM-L6-v2) declare a
@@ -126,6 +136,21 @@ class OnnxEmbedding:
     @property
     def batch_size(self) -> int:
         return self._batch_size
+
+    def close(self) -> None:
+        """Release the resident-model slot.  Safe to call more than once."""
+        slot = getattr(self, "_slot", None)
+        if slot is not None:
+            slot.release()
+            self._slot = None
+
+    def __del__(self) -> None:
+        # Best effort only; interpreter shutdown also releases via atexit, and
+        # the kernel drops the flock when the process dies either way.
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.close()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         from .utils import batched_embed

@@ -53,6 +53,14 @@ class MemSearch:
     exclude:
         Additional gitignore-style patterns applied relative to each index
         root after discovered ignore-file rules.
+    embedding_threads:
+        Intra-op thread cap for providers that run the model in this process.
+        ``0`` means auto.  See :mod:`memsearch.embeddings.runtime`.
+    embedding_max_concurrent:
+        How many processes may hold the embedding model resident at once.
+        ``0`` means auto (1 for local model providers, unlimited for API ones).
+    reranker_threads:
+        Intra-op thread cap for the cross-encoder.  ``0`` means auto.
     """
 
     def __init__(
@@ -64,6 +72,8 @@ class MemSearch:
         embedding_batch_size: int = 0,
         embedding_base_url: str | None = None,
         embedding_api_key: str | None = None,
+        embedding_threads: int = 0,
+        embedding_max_concurrent: int = 0,
         milvus_uri: str = "~/.memsearch/milvus.db",
         milvus_token: str | None = None,
         collection: str = "memsearch_chunks",
@@ -73,6 +83,7 @@ class MemSearch:
         ignore_files: list[str] | None = None,
         exclude: list[str] | None = None,
         reranker_model: str = "",
+        reranker_threads: int = 0,
     ) -> None:
         self._paths = [str(p) for p in (paths or [])]
         self._max_chunk_size = max_chunk_size
@@ -85,6 +96,8 @@ class MemSearch:
             batch_size=embedding_batch_size,
             base_url=embedding_base_url,
             api_key=embedding_api_key,
+            threads=embedding_threads,
+            max_concurrent=embedding_max_concurrent,
         )
         self._store = MilvusStore(
             uri=milvus_uri,
@@ -94,6 +107,7 @@ class MemSearch:
             description=description,
         )
         self._reranker_model = reranker_model
+        self._reranker_threads = reranker_threads
 
     # ------------------------------------------------------------------
     # Indexing
@@ -253,7 +267,9 @@ class MemSearch:
         if self._reranker_model and results:
             from .reranker import rerank
 
-            results = rerank(query, results, model_name=self._reranker_model, top_k=top_k)
+            results = rerank(
+                query, results, model_name=self._reranker_model, top_k=top_k, threads=self._reranker_threads
+            )
         return results
 
     # ------------------------------------------------------------------
@@ -440,6 +456,11 @@ class MemSearch:
     def close(self) -> None:
         """Release resources."""
         self._store.close()
+        # Local model providers hold a cross-process slot for as long as the
+        # model is resident; API providers have nothing to close.
+        embedder_close = getattr(self._embedder, "close", None)
+        if callable(embedder_close):
+            embedder_close()
 
     def __enter__(self) -> MemSearch:
         return self

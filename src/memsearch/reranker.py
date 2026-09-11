@@ -101,8 +101,13 @@ def _find_onnx_file(repo_id: str, repo_files: list[str]) -> str:
     return onnx_files[0]
 
 
-def _load_onnx_model(model_name: str) -> _OnnxCachedModel:
-    """Download (if needed) and load an ONNX cross-encoder model."""
+def _load_onnx_model(model_name: str, threads: int = 0) -> _OnnxCachedModel:
+    """Download (if needed) and load an ONNX cross-encoder model.
+
+    *threads* caps the session's intra-op pool; ``0`` means auto.  The cache is
+    keyed by model name only — *threads* comes from configuration, so it does
+    not vary within a process.
+    """
     with _onnx_cache_lock:
         if model_name in _onnx_cache:
             return _onnx_cache[model_name]
@@ -132,7 +137,9 @@ def _load_onnx_model(model_name: str) -> _OnnxCachedModel:
 
     import onnxruntime as ort
 
-    session = ort.InferenceSession(model_path)
+    from .embeddings.runtime import onnx_session_options, resolve_threads
+
+    session = ort.InferenceSession(model_path, sess_options=onnx_session_options(resolve_threads(threads)))
     input_names = {inp.name for inp in session.get_inputs()}
 
     cached = _OnnxCachedModel(session=session, tokenizer=tokenizer, input_names=input_names)
@@ -155,9 +162,11 @@ def _extract_scores(logits: np.ndarray) -> list[float]:
     return [1.0 / (1.0 + math.exp(-float(x))) for x in logits.flatten()]
 
 
-def _rerank_onnx(query: str, results: list[dict[str, Any]], model_name: str, top_k: int) -> list[dict[str, Any]]:
+def _rerank_onnx(
+    query: str, results: list[dict[str, Any]], model_name: str, top_k: int, threads: int = 0
+) -> list[dict[str, Any]]:
     """Rerank using ONNX Runtime backend."""
-    model = _load_onnx_model(model_name)
+    model = _load_onnx_model(model_name, threads)
 
     pairs = [(query, r["content"]) for r in results]
     encoded = [model.tokenizer.encode(*pair) for pair in pairs]
@@ -198,14 +207,21 @@ _torch_cache: dict[str, Any] = {}  # model_name -> CrossEncoder instance
 _torch_cache_lock = threading.Lock()
 
 
-def _load_torch_model(model_name: str) -> Any:
-    """Load a sentence-transformers CrossEncoder model."""
+def _load_torch_model(model_name: str, threads: int = 0) -> Any:
+    """Load a sentence-transformers CrossEncoder model.
+
+    *threads* caps torch's intra-op pool; ``0`` means auto.
+    """
     with _torch_cache_lock:
         if model_name in _torch_cache:
             return _torch_cache[model_name]
 
+    import torch
     from sentence_transformers import CrossEncoder
 
+    from .embeddings.runtime import resolve_threads
+
+    torch.set_num_threads(resolve_threads(threads))
     model = CrossEncoder(model_name, max_length=_MAX_RERANK_TOKENS)
     logger.info("Loaded PyTorch cross-encoder reranker: %s", model_name)
 
@@ -215,9 +231,11 @@ def _load_torch_model(model_name: str) -> Any:
         return _torch_cache[model_name]
 
 
-def _rerank_torch(query: str, results: list[dict[str, Any]], model_name: str, top_k: int) -> list[dict[str, Any]]:
+def _rerank_torch(
+    query: str, results: list[dict[str, Any]], model_name: str, top_k: int, threads: int = 0
+) -> list[dict[str, Any]]:
     """Rerank using sentence-transformers CrossEncoder backend."""
-    model = _load_torch_model(model_name)
+    model = _load_torch_model(model_name, threads)
 
     pairs = [(query, r["content"]) for r in results]
     raw_scores = model.predict(pairs)
@@ -239,6 +257,7 @@ def rerank(
     *,
     model_name: str = DEFAULT_RERANKER,
     top_k: int = 0,
+    threads: int = 0,
 ) -> list[dict[str, Any]]:
     """Re-score search results with a cross-encoder.
 
@@ -258,6 +277,10 @@ def rerank(
     top_k:
         Return only the top-k results after reranking.
         0 means return all results (re-sorted).
+    threads:
+        Intra-op thread cap for the cross-encoder.  0 means auto, which is
+        bounded rather than left at one thread per core — see
+        ``memsearch.embeddings.runtime``.
 
     Returns
     -------
@@ -269,9 +292,9 @@ def rerank(
 
     backend = _detect_backend()
     if backend == "onnx":
-        return _rerank_onnx(query, results, model_name, top_k)
+        return _rerank_onnx(query, results, model_name, top_k, threads)
     if backend == "torch":
-        return _rerank_torch(query, results, model_name, top_k)
+        return _rerank_torch(query, results, model_name, top_k, threads)
 
     logger.warning(
         "Reranker model %r configured but neither onnxruntime nor "

@@ -31,10 +31,17 @@ class LocalEmbedding:
         model: str = "all-MiniLM-L6-v2",
         *,
         batch_size: int = 0,
+        threads: int = 0,
+        max_concurrent: int = 0,
     ) -> None:
         import io
         import os
         import sys
+
+        from .runtime import acquire_model_slot, resolve_max_concurrent, resolve_threads
+
+        # Held for as long as the model is resident — see runtime.acquire_model_slot.
+        self._slot = acquire_model_slot(resolve_max_concurrent("local", max_concurrent))
 
         # Suppress noisy "Loading weights" tqdm bar and safetensors LOAD REPORT
         prev_tqdm = os.environ.get("TQDM_DISABLE")
@@ -42,8 +49,12 @@ class LocalEmbedding:
         old_stderr = sys.stderr
         try:
             sys.stderr = io.StringIO()
+            import torch
             from sentence_transformers import SentenceTransformer
 
+            # Same bound as the ONNX provider: torch also defaults its intra-op
+            # pool to the core count, which is wrong for one of many processes.
+            torch.set_num_threads(resolve_threads(threads))
             self._st_model = SentenceTransformer(model, device=_detect_device(), trust_remote_code=True)
         finally:
             sys.stderr = old_stderr
@@ -66,6 +77,19 @@ class LocalEmbedding:
     @property
     def batch_size(self) -> int:
         return self._batch_size
+
+    def close(self) -> None:
+        """Release the resident-model slot.  Safe to call more than once."""
+        slot = getattr(self, "_slot", None)
+        if slot is not None:
+            slot.release()
+            self._slot = None
+
+    def __del__(self) -> None:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.close()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         from .utils import batched_embed
