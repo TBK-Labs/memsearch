@@ -36,3 +36,5 @@ AGENTS.local.md
 # OS
 .DS_Store
 Thumbs.db
+.worktrees/
+.claude/worktrees/
